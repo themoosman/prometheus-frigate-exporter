@@ -4,11 +4,12 @@ import time
 import sys
 import logging
 import os
+from datetime import datetime
 from urllib.request import urlopen
 from urllib import error
 from prometheus_client.core import GaugeMetricFamily, InfoMetricFamily, CounterMetricFamily, REGISTRY
 from prometheus_client import start_http_server, Gauge
-
+from prometheus_client.registry import Collector
 
 def add_metric(metric, label, stats, key, multiplier=1.0):
     try:
@@ -19,26 +20,82 @@ def add_metric(metric, label, stats, key, multiplier=1.0):
         pass
 
 
-def set_value_with_timestamp(metric, labels, value, timestamp):
-    labels["timestamp"] = timestamp
-    metric.labels(**labels).set(value)
+class CustomTimestampedGaugeCollector(Collector):
 
-
-class TimestampedGauge(Gauge):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, _url):
+        self.stats_url = _url
 
     def collect(self):
-        metrics = super().collect()
-        for metric in metrics:
-            samples = []
-            for sample in metric.samples:
-                timestamp = sample.labels.pop("timestamp", None)
-                sample_with_timestamp = type(sample)(sample.name, sample.labels,
-                                                     sample.value, timestamp, sample.exemplar)
-                samples.append(sample_with_timestamp)
-            metric.samples = samples
-        return metrics
+        events = []
+        # get all the current events
+        try:
+            # change url from stats to events
+            events_url = self.stats_url.replace('stats', 'events')
+            events = json.loads(urlopen(events_url).read())
+
+        except error.URLError as e:
+            logging.error("URLError while opening Frigate events url %s: %s", self.stats_url, e)
+            return
+        
+        # get all cameras
+        try:
+            # change url from stats to events
+            config_url = self.stats_url.replace('stats', 'config')
+            config = json.loads(urlopen(config_url).read())
+            cameras = list(config['cameras'].keys())
+
+        except error.URLError as e:
+            logging.error("URLError while opening Frigate config url %s: %s", self.stats_url, e)
+            return
+        
+        # Get labels assigned to each camera
+        camera_labels = {}
+        try:
+            # change url from stats to events
+            events_url = self.stats_url.replace('stats', 'labels')
+            for c_labels in cameras:
+                label_url = events_url + '?camera=' + c_labels
+                camera_labels[c_labels] = json.loads(urlopen(label_url).read())
+            for key, values in camera_labels.items():
+                logging.info("%s: has label list length: %s" % (key, str(len(values))))
+
+
+        except error.URLError as e:
+            logging.error("URLError while opening Frigate labels url %s: %s", self.stats_url, e)
+            return
+
+        frigate_events = GaugeMetricFamily(
+            'frigate_camera_events_by_camera_label', 'Frigate Events by Camera and Label Metric.', 
+            labels=["camera", "label"]
+        )
+
+        non_zero = 0
+        zero = 0
+        if len(events) > 0:
+            # loop each event
+            for e in events:
+                # build the metric
+                cam = e['camera']
+                label = e['label']
+                frigate_events.add_metric([cam, label], 1, e['start_time'])
+                labels = list(camera_labels[cam])
+                if label in labels:
+                    labels.remove(label)
+                    camera_labels[cam] = labels
+                non_zero += 1
+            # set the rest of the camera/label combinations to 0 with current TS
+            epoch = int(datetime.now().timestamp())
+            for key, values in camera_labels.items():
+                logging.info("%s: has label list length: %s" % (key, str(len(values))))
+                for v in values:
+                    frigate_events.add_metric([key, v], 0, epoch)
+                    zero += 1
+
+        yield frigate_events
+        logging.info("Added %s non-zero metrics." % str(non_zero))
+        logging.info("Added %s zero metrics." % str(zero))
+        logging.info("%s frigate_camera_events_by_camera_label." % len(frigate_events.samples))
+        logging.info("Done processing CustomTimestampedGaugeCollector")
 
 
 class CustomCollector(object):
@@ -355,7 +412,9 @@ class CustomCollector(object):
             self.previous_event_id = events[0]['id']
             self.previous_event_start_time = int(events[0]['start_time'])
 
-        camera_events = CounterMetricFamily('frigate_camera_events', 'Count of camera events since exporter started', labels=['camera', 'label'])
+        camera_events = CounterMetricFamily('frigate_camera_events', 
+                                            'Count of camera events since exporter started', 
+                                            labels=['camera', 'label'])
 
         for camera, cam_dict in self.all_events.items():
             for label, label_value in cam_dict.items():
@@ -363,21 +422,8 @@ class CustomCollector(object):
 
         yield camera_events
 
-        if len(events) > 0:
-            frigate_events = TimestampedGauge("frigate_event", "Frigate Event Metric", ["camera", "label", "id", "timestamp"])
-
-            for event in events:
-                # loop each event
-                id = event['id']
-                c1 = event['camera']
-                timestamp = event['end_time']
-                event_label = event['label']
-                labels = {"camera": c1, "label": event_label, "id": id}
-                set_value_with_timestamp(frigate_events, labels, 1, timestamp)
-
-        yield frigate_events
-
-        logging.info("done")
+        logging.info("%s frigate_camera_events." % len(camera_events.samples))
+        logging.info("Done processing CustomCollector")
 
 
 if __name__ == '__main__':
@@ -392,7 +438,8 @@ if __name__ == '__main__':
         sys.exit()
 
     REGISTRY.register(CustomCollector(url))
-    port = int(os.environ.get('PORT', 9107))
+    REGISTRY.register(CustomTimestampedGaugeCollector(url))
+    port = int(os.environ.get('PORT', 9100))
     start_http_server(port)
 
     logging.info('Started, Frigate API URL: %s', url)
