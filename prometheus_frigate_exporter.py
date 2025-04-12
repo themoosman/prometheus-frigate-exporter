@@ -36,7 +36,7 @@ class CustomTimestampedGaugeCollector(Collector):
         except error.URLError as e:
             logging.error("URLError while opening Frigate events url %s: %s", self.stats_url, e)
             return
-        
+
         # get all cameras
         try:
             # change url from stats to events
@@ -47,7 +47,7 @@ class CustomTimestampedGaugeCollector(Collector):
         except error.URLError as e:
             logging.error("URLError while opening Frigate config url %s: %s", self.stats_url, e)
             return
-        
+
         # Get labels assigned to each camera
         camera_labels = {}
         try:
@@ -59,7 +59,6 @@ class CustomTimestampedGaugeCollector(Collector):
             for key, values in camera_labels.items():
                 logging.info("%s: has label list length: %s" % (key, str(len(values))))
 
-
         except error.URLError as e:
             logging.error("URLError while opening Frigate labels url %s: %s", self.stats_url, e)
             return
@@ -68,21 +67,40 @@ class CustomTimestampedGaugeCollector(Collector):
             'frigate_camera_events_by_camera_label', 'Frigate Events by Camera and Label Metric.', 
             labels=["camera", "label"]
         )
-
         non_zero = 0
         zero = 0
+        current_events = {}
         if len(events) > 0:
-            # loop each event
             for e in events:
-                # build the metric
-                cam = e['camera']
-                label = e['label']
-                frigate_events.add_metric([cam, label], 1, e['start_time'])
+                key = e["camera"] + "|" + e['label']
+                if key in current_events:
+                    tup = current_events[key]
+                    new_tup = (tup[0] + 1, tup[1])
+                    current_events[key] = new_tup
+                else:
+                    current_events[key] = (1, e['start_time'])
+            for key, value in current_events.items():
+                s_key = key.split("|")
+                cam = s_key[0]
+                label = s_key[1]
+                frigate_events.add_metric([cam, label], value[0], value[1])
                 labels = list(camera_labels[cam])
                 if label in labels:
                     labels.remove(label)
                     camera_labels[cam] = labels
                 non_zero += 1
+
+            # # loop each event
+            # for e in events:
+            #     # build the metric
+            #     cam = e['camera']
+            #     label = e['label']
+            #     frigate_events.add_metric([cam, label], 1, e['start_time'])
+            #     labels = list(camera_labels[cam])
+            #     if label in labels:
+            #         labels.remove(label)
+            #         camera_labels[cam] = labels
+            #     non_zero += 1
             # set the rest of the camera/label combinations to 0 with current TS
             epoch = int(datetime.now().timestamp())
             for key, values in camera_labels.items():
