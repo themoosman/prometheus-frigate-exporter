@@ -7,9 +7,10 @@ import os
 from datetime import datetime
 from urllib.request import urlopen
 from urllib import error
+from prometheus_client import start_http_server
 from prometheus_client.core import GaugeMetricFamily, InfoMetricFamily, CounterMetricFamily, REGISTRY
-from prometheus_client import start_http_server, Gauge
 from prometheus_client.registry import Collector
+
 
 def add_metric(metric, label, stats, key, multiplier=1.0):
     try:
@@ -64,21 +65,27 @@ class CustomTimestampedGaugeCollector(Collector):
             return
 
         frigate_events = GaugeMetricFamily(
-            'frigate_camera_events_by_camera_label', 'Frigate Events by Camera and Label Metric.', 
+            'frigate_camera_events_by_camera_label', 'Frigate Events by Camera and Label Metric.',
             labels=["camera", "label"]
         )
         non_zero = 0
         zero = 0
         current_events = {}
         if len(events) > 0:
+            # loop the events and build a dic of previous events and counts by cam/label
+            # use the TS from the most recent combination of cam/label
+            # since we use the TS from the event, we won't double count in promeetheus
             for e in events:
+                # combine camera and label as the dict key
                 key = e["camera"] + "|" + e['label']
+                # if we find another cam/label combination, we ++ but use the most recent TS
                 if key in current_events:
-                    tup = current_events[key]
-                    new_tup = (tup[0] + 1, tup[1])
-                    current_events[key] = new_tup
+                    temp_tuple = current_events[key]
+                    current_events[key] = (temp_tuple[0] + 1, temp_tuple[1])
                 else:
+                    # Key not found, use the most recent TS and val 1 for the combo.
                     current_events[key] = (1, e['start_time'])
+            # using the previous dict, create the metrics for values >= 1
             for key, value in current_events.items():
                 s_key = key.split("|")
                 cam = s_key[0]
@@ -89,18 +96,6 @@ class CustomTimestampedGaugeCollector(Collector):
                     labels.remove(label)
                     camera_labels[cam] = labels
                 non_zero += 1
-
-            # # loop each event
-            # for e in events:
-            #     # build the metric
-            #     cam = e['camera']
-            #     label = e['label']
-            #     frigate_events.add_metric([cam, label], 1, e['start_time'])
-            #     labels = list(camera_labels[cam])
-            #     if label in labels:
-            #         labels.remove(label)
-            #         camera_labels[cam] = labels
-            #     non_zero += 1
             # set the rest of the camera/label combinations to 0 with current TS
             epoch = int(datetime.now().timestamp())
             for key, values in camera_labels.items():
@@ -159,9 +154,9 @@ class CustomCollector(object):
 
         # camera stats
         audio_dBFS = GaugeMetricFamily('frigate_audio_dBFS', 'Audio dBFS for camera',
-                                              labels=['camera_name'])
+                                       labels=['camera_name'])
         audio_rms = GaugeMetricFamily('frigate_audio_rms', 'Audio RMS for camera',
-                                              labels=['camera_name'])
+                                      labels=['camera_name'])
         camera_fps = GaugeMetricFamily('frigate_camera_fps', 'Frames per second being consumed from your camera.',
                                        labels=['camera_name'])
         detection_enabled = GaugeMetricFamily('frigate_detection_enabled', 'Detection enabled for camera',
@@ -421,17 +416,17 @@ class CustomCollector(object):
                         cam[event['label']] += 1
                     except KeyError:
                         # create label dict if not exists
-                        cam.update({event['label']: 1 })
+                        cam.update({event['label']: 1})
                 except KeyError:
                     # create camera and label dict if not exists
-                    self.all_events.update({event['camera']: {event['label'] : 1} })
+                    self.all_events.update({event['camera']: {event['label']: 1}})
 
             # don't recount events next time
             self.previous_event_id = events[0]['id']
             self.previous_event_start_time = int(events[0]['start_time'])
 
-        camera_events = CounterMetricFamily('frigate_camera_events', 
-                                            'Count of camera events since exporter started', 
+        camera_events = CounterMetricFamily('frigate_camera_events',
+                                            'Count of camera events since exporter started',
                                             labels=['camera', 'label'])
 
         for camera, cam_dict in self.all_events.items():
