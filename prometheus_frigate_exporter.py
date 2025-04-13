@@ -25,6 +25,8 @@ class CustomTimestampedGaugeCollector(Collector):
 
     def __init__(self, _url):
         self.stats_url = _url
+        self.previous_event_id = 0
+        self.previous_event_start_time = 0
 
     def collect(self):
         events = []
@@ -32,6 +34,8 @@ class CustomTimestampedGaugeCollector(Collector):
         try:
             # change url from stats to events
             events_url = self.stats_url.replace('stats', 'events')
+            if self.previous_event_start_time:
+                events_url = events_url + '?after=' + str(self.previous_event_start_time)
             events = json.loads(urlopen(events_url).read())
 
         except error.URLError as e:
@@ -57,8 +61,8 @@ class CustomTimestampedGaugeCollector(Collector):
             for c_labels in cameras:
                 label_url = events_url + '?camera=' + c_labels
                 camera_labels[c_labels] = json.loads(urlopen(label_url).read())
-            for key, values in camera_labels.items():
-                logging.info("%s: has label list length: %s" % (key, str(len(values))))
+            # for key, values in camera_labels.items():
+            #     logging.info("%s: has label list length: %s" % (key, str(len(values))))
 
         except error.URLError as e:
             logging.error("URLError while opening Frigate labels url %s: %s", self.stats_url, e)
@@ -70,38 +74,61 @@ class CustomTimestampedGaugeCollector(Collector):
         )
         non_zero = 0
         zero = 0
-        current_events = {}
+        epoch_now = int(datetime.now().timestamp())
         if len(events) > 0:
-            # loop the events and build a dic of previous events and counts by cam/label
-            # use the TS from the most recent combination of cam/label
-            # since we use the TS from the event, we won't double count in promeetheus
+            # # loop the events and build a dic of previous events and counts by cam/label
+            # # use the TS from the most recent combination of cam/label
+            # # since we use the TS from the event, we won't double count in promeetheus
+            # current_events = {}
+            # for e in events:
+            #     # combine camera and label as the dict key
+            #     key = e["camera"] + "|" + e['label']
+            #     # if we find another cam/label combination, we ++ but use the most recent TS
+            #     if key in current_events:
+            #         temp_tuple = current_events[key]
+            #         current_events[key] = (temp_tuple[0] + 1, temp_tuple[1])
+            #     else:
+            #         # Key not found, use the most recent TS and val 1 for the combo.
+            #         current_events[key] = (1, e['start_time'])
+            # # using the previous dict, create the metrics for values >= 1
+            # for key, value in current_events.items():
+            #     s_key = key.split("|")
+            #     cam = s_key[0]
+            #     label = s_key[1]
+            #     frigate_events.add_metric([cam, label], value[0], value[1])
+            #     labels = list(camera_labels[cam])
+            #     if label in labels:
+            #         labels.remove(label)
+            #         camera_labels[cam] = labels
+            #     non_zero += 1
+            # loop each event
             for e in events:
-                # combine camera and label as the dict key
-                key = e["camera"] + "|" + e['label']
-                # if we find another cam/label combination, we ++ but use the most recent TS
-                if key in current_events:
-                    temp_tuple = current_events[key]
-                    current_events[key] = (temp_tuple[0] + 1, temp_tuple[1])
-                else:
-                    # Key not found, use the most recent TS and val 1 for the combo.
-                    current_events[key] = (1, e['start_time'])
-            # using the previous dict, create the metrics for values >= 1
-            for key, value in current_events.items():
-                s_key = key.split("|")
-                cam = s_key[0]
-                label = s_key[1]
-                frigate_events.add_metric([cam, label], value[0], value[1])
+                start_time = e['start_time']
+                # break if event already counted
+                if e['id'] == self.previous_event_id:
+                    break
+                # break if event starts before previous event
+                if start_time < self.previous_event_start_time:
+                    break
+                # build the metric
+                cam = e['camera']
+                label = e['label']
+                logging.info("Adding: %s:%s, with ts: %s" % (cam, label, str(start_time)))
+                frigate_events.add_metric([cam, label], 1, start_time)
                 labels = list(camera_labels[cam])
                 if label in labels:
+                    logging.info("Removing label: %s:%s" % (cam, label))
                     labels.remove(label)
                     camera_labels[cam] = labels
                 non_zero += 1
+            # don't recount events next time
+            self.previous_event_id = events[0]['id']
+            self.previous_event_start_time = int(events[0]['start_time'])
             # set the rest of the camera/label combinations to 0 with current TS
-            epoch = int(datetime.now().timestamp())
             for key, values in camera_labels.items():
-                logging.info("%s: has label list length: %s" % (key, str(len(values))))
+                # logging.info("%s: has label list length: %s" % (key, str(len(values))))
                 for v in values:
-                    frigate_events.add_metric([key, v], 0, epoch)
+                    frigate_events.add_metric([key, v], 0, epoch_now)
                     zero += 1
 
         yield frigate_events
