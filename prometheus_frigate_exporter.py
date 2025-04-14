@@ -29,6 +29,7 @@ class CustomTimestampedGaugeCollector(Collector):
         self.previous_event_start_time = None
 
     def collect(self):
+        logging.info("Start processing CustomTimestampedGaugeCollector")
         events = []
         epoch_now = int(datetime.now().timestamp())
         # get all the current events
@@ -88,7 +89,7 @@ class CustomTimestampedGaugeCollector(Collector):
                     else:
                         frigate_events.add_metric([camera, label], 0, epoch_now)
                         zero += 1
-            self.previous_event_start_time = int(events[0]['start_time'])
+            self.previous_event_start_time = int(events[0]['start_time']) + 1
         else:
             logging.info("No new events")
             for key, values in camera_labels.items():
@@ -103,15 +104,136 @@ class CustomTimestampedGaugeCollector(Collector):
         logging.info("%s frigate_camera_events_by_camera_label." % len(frigate_events.samples))
         logging.info("Done processing CustomTimestampedGaugeCollector")
 
-    def collect1(self):
+    # def collect1(self):
+    #     events = []
+    #     # get all the current events
+    #     try:
+    #         # change url from stats to events
+    #         events_url = self.stats_url.replace('stats', 'events')
+    #         if self.previous_event_start_time:
+    #             events_url = events_url + '?after=' + str(self.previous_event_start_time)
+    #         events = json.loads(urlopen(events_url).read())
+
+    #     except error.URLError as e:
+    #         logging.error("URLError while opening Frigate events url %s: %s", self.stats_url, e)
+    #         return
+
+    #     # get all cameras
+    #     try:
+    #         # change url from stats to events
+    #         config_url = self.stats_url.replace('stats', 'config')
+    #         config = json.loads(urlopen(config_url).read())
+    #         cameras = list(config['cameras'].keys())
+
+    #     except error.URLError as e:
+    #         logging.error("URLError while opening Frigate config url %s: %s", self.stats_url, e)
+    #         return
+
+    #     # Get labels assigned to each camera
+    #     camera_labels = {}
+    #     try:
+    #         # change url from stats to events
+    #         events_url = self.stats_url.replace('stats', 'labels')
+    #         for c_labels in cameras:
+    #             label_url = events_url + '?camera=' + c_labels
+    #             camera_labels[c_labels] = json.loads(urlopen(label_url).read())
+    #         # for key, values in camera_labels.items():
+    #         #     logging.info("%s: has label list length: %s" % (key, str(len(values))))
+
+    #     except error.URLError as e:
+    #         logging.error("URLError while opening Frigate labels url %s: %s", self.stats_url, e)
+    #         return
+
+    #     frigate_events = GaugeMetricFamily(
+    #         'frigate_camera_events_by_camera_label', 'Frigate Events by Camera and Label Metric.',
+    #         labels=["camera", "label"]
+    #     )
+    #     non_zero = 0
+    #     zero = 0
+    #     epoch_now = int(datetime.now().timestamp())
+    #     if len(events) > 0:
+    #         # # loop the events and build a dic of previous events and counts by cam/label
+    #         # # use the TS from the most recent combination of cam/label
+    #         # # since we use the TS from the event, we won't double count in promeetheus
+    #         # current_events = {}
+    #         # for e in events:
+    #         #     # combine camera and label as the dict key
+    #         #     key = e["camera"] + "|" + e['label']
+    #         #     # if we find another cam/label combination, we ++ but use the most recent TS
+    #         #     if key in current_events:
+    #         #         temp_tuple = current_events[key]
+    #         #         current_events[key] = (temp_tuple[0] + 1, temp_tuple[1])
+    #         #     else:
+    #         #         # Key not found, use the most recent TS and val 1 for the combo.
+    #         #         current_events[key] = (1, e['start_time'])
+    #         # # using the previous dict, create the metrics for values >= 1
+    #         # for key, value in current_events.items():
+    #         #     s_key = key.split("|")
+    #         #     cam = s_key[0]
+    #         #     label = s_key[1]
+    #         #     frigate_events.add_metric([cam, label], value[0], value[1])
+    #         #     labels = list(camera_labels[cam])
+    #         #     if label in labels:
+    #         #         labels.remove(label)
+    #         #         camera_labels[cam] = labels
+    #         #     non_zero += 1
+    #         # loop each event
+    #         group_events = {}
+    #         for e in events:
+    #             start_time = int(e['start_time'])
+    #             # break if event already counted
+    #             if e['id'] == self.previous_event_id:
+    #                 break
+    #             # break if event starts before previous event
+    #             if start_time < self.previous_event_start_time:
+    #                 break
+    #             # build the metric
+    #             cam = e['camera']
+    #             label = e['label']
+    #             key = cam + "|" + label + "|"
+    #             logging.info("Adding: %s:%s, with ts: %s" % (cam, label, str(start_time)))
+    #             frigate_events.add_metric([cam, label], 1, start_time)
+    #             labels = list(camera_labels[cam])
+    #             if label in labels:
+    #                 logging.info("Removing label: %s:%s" % (cam, label))
+    #                 labels.remove(label)
+    #                 camera_labels[cam] = labels
+    #             non_zero += 1
+    #         # don't recount events next time
+    #         self.previous_event_id = events[0]['id']
+    #         self.previous_event_start_time = int(events[0]['start_time'])
+    #         # set the rest of the camera/label combinations to 0 with current TS
+    #         for key, values in camera_labels.items():
+    #             # logging.info("%s: has label list length: %s" % (key, str(len(values))))
+    #             for v in values:
+    #                 frigate_events.add_metric([key, v], 0, epoch_now)
+    #                 zero += 1
+
+    #     yield frigate_events
+    #     logging.info("Added %s non-zero metrics." % str(non_zero))
+    #     logging.info("Added %s zero metrics." % str(zero))
+    #     logging.info("%s frigate_camera_events_by_camera_label." % len(frigate_events.samples))
+    #     logging.info("Done processing CustomTimestampedGaugeCollector")
+
+
+class CustomTimestampedGaugeCollector2(Collector):
+
+    def __init__(self, _url):
+        self.stats_url = _url
+        self.previous_event_end_time = None
+
+    def collect(self):
+        logging.info("Start processing CustomTimestampedGaugeCollector2")
         events = []
+        epoch_now = int(datetime.now().timestamp())
         # get all the current events
         try:
             # change url from stats to events
             events_url = self.stats_url.replace('stats', 'events')
-            if self.previous_event_start_time:
-                events_url = events_url + '?after=' + str(self.previous_event_start_time)
-            events = json.loads(urlopen(events_url).read())
+            if not self.previous_event_end_time:
+                self.previous_event_end_time = epoch_now
+            events_url = events_url + '?include_thumbnails=0&in_progress=0&after=' + str(self.previous_event_end_time)
+            events = json.loads(urlopen(events_url).read())             
 
         except error.URLError as e:
             logging.error("URLError while opening Frigate events url %s: %s", self.stats_url, e)
@@ -144,75 +266,37 @@ class CustomTimestampedGaugeCollector(Collector):
             return
 
         frigate_events = GaugeMetricFamily(
-            'frigate_camera_events_by_camera_label', 'Frigate Events by Camera and Label Metric.',
+            'frigate_camera_events_by_camera_label2', 'Frigate Events by Camera and Label Metric.',
             labels=["camera", "label"]
         )
+
         non_zero = 0
         zero = 0
-        epoch_now = int(datetime.now().timestamp())
         if len(events) > 0:
-            # # loop the events and build a dic of previous events and counts by cam/label
-            # # use the TS from the most recent combination of cam/label
-            # # since we use the TS from the event, we won't double count in promeetheus
-            # current_events = {}
-            # for e in events:
-            #     # combine camera and label as the dict key
-            #     key = e["camera"] + "|" + e['label']
-            #     # if we find another cam/label combination, we ++ but use the most recent TS
-            #     if key in current_events:
-            #         temp_tuple = current_events[key]
-            #         current_events[key] = (temp_tuple[0] + 1, temp_tuple[1])
-            #     else:
-            #         # Key not found, use the most recent TS and val 1 for the combo.
-            #         current_events[key] = (1, e['start_time'])
-            # # using the previous dict, create the metrics for values >= 1
-            # for key, value in current_events.items():
-            #     s_key = key.split("|")
-            #     cam = s_key[0]
-            #     label = s_key[1]
-            #     frigate_events.add_metric([cam, label], value[0], value[1])
-            #     labels = list(camera_labels[cam])
-            #     if label in labels:
-            #         labels.remove(label)
-            #         camera_labels[cam] = labels
-            #     non_zero += 1
-            # loop each event
-            group_events = {}
-            for e in events:
-                start_time = int(e['start_time'])
-                # break if event already counted
-                if e['id'] == self.previous_event_id:
-                    break
-                # break if event starts before previous event
-                if start_time < self.previous_event_start_time:
-                    break
-                # build the metric
-                cam = e['camera']
-                label = e['label']
-                key = cam + "|" + label + "|"
-                logging.info("Adding: %s:%s, with ts: %s" % (cam, label, str(start_time)))
-                frigate_events.add_metric([cam, label], 1, start_time)
-                labels = list(camera_labels[cam])
-                if label in labels:
-                    logging.info("Removing label: %s:%s" % (cam, label))
-                    labels.remove(label)
-                    camera_labels[cam] = labels
-                non_zero += 1
-            # don't recount events next time
-            self.previous_event_id = events[0]['id']
-            self.previous_event_start_time = int(events[0]['start_time'])
-            # set the rest of the camera/label combinations to 0 with current TS
+            for camera, labels in camera_labels.items():
+                for label in labels:
+                    cl_events = list(filter(lambda e: e['camera'] == camera and e['label'] == label, events))
+                    if len(cl_events) > 0:
+                        frigate_events.add_metric([camera, label], len(cl_events), int(cl_events[0]['end_time']))
+                        logging.info("%s|%s|%s: value: %s" % (camera, label, int(cl_events[0]['end_time']), int(len(cl_events))))
+                        non_zero += 1
+                    else:
+                        frigate_events.add_metric([camera, label], 0, epoch_now)
+                        zero += 1
+            self.previous_event_end_time = int(events[0]['end_time'])
+        else:
+            logging.info("No new events")
             for key, values in camera_labels.items():
-                # logging.info("%s: has label list length: %s" % (key, str(len(values))))
                 for v in values:
                     frigate_events.add_metric([key, v], 0, epoch_now)
                     zero += 1
+            self.previous_event_end_time = epoch_now
 
         yield frigate_events
         logging.info("Added %s non-zero metrics." % str(non_zero))
         logging.info("Added %s zero metrics." % str(zero))
         logging.info("%s frigate_camera_events_by_camera_label." % len(frigate_events.samples))
-        logging.info("Done processing CustomTimestampedGaugeCollector")
+        logging.info("Done processing CustomTimestampedGaugeCollector2")
 
 
 class CustomCollector(object):
@@ -556,6 +640,7 @@ if __name__ == '__main__':
 
     REGISTRY.register(CustomCollector(url))
     REGISTRY.register(CustomTimestampedGaugeCollector(url))
+    REGISTRY.register(CustomTimestampedGaugeCollector2(url))
     port = int(os.environ.get('PORT', 9100))
     start_http_server(port)
 
