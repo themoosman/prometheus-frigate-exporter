@@ -25,7 +25,6 @@ class CustomTimestampedGaugeCollector(Collector):
 
     def __init__(self, _url):
         self.stats_url = _url
-        self.previous_event_id = None
         self.previous_event_start_time = None
 
     def collect(self):
@@ -64,8 +63,6 @@ class CustomTimestampedGaugeCollector(Collector):
             for c_labels in cameras:
                 label_url = events_url + '?camera=' + c_labels
                 camera_labels[c_labels] = json.loads(urlopen(label_url).read())
-            # for key, values in camera_labels.items():
-            #     logging.info("%s: has label list length: %s" % (key, str(len(values))))
 
         except error.URLError as e:
             logging.error("URLError while opening Frigate labels url %s: %s", self.stats_url, e)
@@ -79,18 +76,26 @@ class CustomTimestampedGaugeCollector(Collector):
         non_zero = 0
         zero = 0
         if len(events) > 0:
+            # loop the camera / labels map
             for camera, labels in camera_labels.items():
+                # loop each of the labels
                 for label in labels:
+                    # Find all the events with the camera / label combination
+                    # this will return 0 to many events
                     cl_events = list(filter(lambda e: e['camera'] == camera and e['label'] == label, events))
+                    # Did we find any events?
                     if len(cl_events) > 0:
+                        # Add a metric with the camera/label, number of events and TS from the event
                         frigate_events.add_metric([camera, label], len(cl_events), int(cl_events[0]['start_time']))
                         logging.info("%s|%s|%s: value: %s" % (camera, label, int(cl_events[0]['start_time']), int(len(cl_events))))
                         non_zero += 1
                     else:
+                        # no events found for the combination, add a 0 metric
                         frigate_events.add_metric([camera, label], 0, epoch_now)
                         zero += 1
             self.previous_event_start_time = int(events[0]['start_time']) + 1
         else:
+            # no new events, add 0 metrics
             logging.info("No new events")
             for key, values in camera_labels.items():
                 for v in values:
@@ -436,8 +441,7 @@ class CustomCollector(object):
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
     try:
-        # url = os.environ['FRIGATE_STATS_URL']
-        url = "http://192.168.1.30:5000/api/stats"
+        url = os.environ['FRIGATE_STATS_URL']
     except KeyError:
         logging.error(
             "Provide Frigate stats url as environment variable to container, "
