@@ -60,7 +60,6 @@ class CustomTimestampedGaugeCollector(Collector):
             if not self.previous_event_start_time:
                 self.previous_event_start_time = epoch_now
             events_url = events_url + '?include_thumbnails=0&after=' + str(self.previous_event_start_time)
-            # events_url = 'http://192.168.1.30:5000/api/events?include_thumbnails=0&after=1744752616&sub_label=amazon'
             events = json.loads(urlopen(events_url).read())
 
         except error.URLError as e:
@@ -480,8 +479,7 @@ class CustomCollector(object):
 if __name__ == '__main__':
     logging.basicConfig(format='%(asctime)s - %(message)s', level=logging.INFO)
     try:
-        #url = os.environ['FRIGATE_STATS_URL']
-        url = 'http://192.168.1.30:5000/api/stats'
+        url = os.environ['FRIGATE_STATS_URL']
     except KeyError:
         logging.error(
             "Provide Frigate stats url as environment variable to container, "
