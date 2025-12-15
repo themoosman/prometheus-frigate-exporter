@@ -493,6 +493,7 @@ if __name__ == '__main__':
 
     logging.info('Started, Frigate API URL: %s', url)
     logging.info('Metrics at: http://localhost:%d/metrics', port)
+    logging.info('Running enhanced Prometheus Frigate Exporter')
 
     while True:
         time.sleep(1)
